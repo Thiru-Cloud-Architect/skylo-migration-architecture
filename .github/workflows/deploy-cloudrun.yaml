@@ -1,0 +1,54 @@
+name: Deploy Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/backend/**'
+      - '.github/workflows/deploy-cloudrun.yml'
+
+env:
+  SERVICE_NAME: pmc-backend
+  REGION: asia-south1
+  PROJECT_ID: your-gcp-project-id
+  REPO_NAME: pmc-backend
+  IMAGE: gcr.io/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}:${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: cloud-run-deployer@your-gcp-project-id.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build container
+        working-directory: app/backend
+        run: |
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE_NAME \
+            --image $IMAGE \
+            --region $REGION \
+            --project $PROJECT_ID \
+            --allow-unauthenticated \
+            --set-env-vars DB_HOST=${{ secrets.DB_HOST }},DB_USER=${{ secrets.DB_USER }},DB_NAME=${{ secrets.DB_NAME }},REDIS_HOST=${{ secrets.REDIS_HOST }}
